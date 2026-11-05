@@ -68,12 +68,13 @@ jobs:
         shell: pwsh
         run: |
           $p = 'gradle.properties'
-          Get-Content $p |
-            Where-Object {
-              $_ -notmatch '^\s*systemProp\.(http|https)\.' -and
-              $_ -notmatch '^\s*android\.sdk\.dir\s*='
-            } |
-            Set-Content $p -Encoding utf8
+          # Buffer first: piping Get-Content straight into Set-Content on the
+          # same path keeps the read handle open and fails on Windows.
+          $lines = @(Get-Content $p | Where-Object {
+            $_ -notmatch '^\s*systemProp\.(http|https)\.' -and
+            $_ -notmatch '^\s*android\.sdk\.dir\s*='
+          })
+          $lines | Set-Content $p -Encoding utf8
           Write-Host "ANDROID_HOME=$env:ANDROID_HOME"
           Write-Host '--- gradle.properties ---'
           Get-Content $p
