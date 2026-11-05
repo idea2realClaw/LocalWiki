@@ -1,0 +1,114 @@
+diff --git a/ggml/src/ggml-vulkan/ggml-vulkan.cpp b/ggml/src/ggml-vulkan/ggml-vulkan.cpp
+index 89f0470..5a31072 100644
+--- a/ggml/src/ggml-vulkan/ggml-vulkan.cpp
++++ b/ggml/src/ggml-vulkan/ggml-vulkan.cpp
+@@ -4336,12 +4336,15 @@ vk_device ggml_vk_get_device(size_t idx) {
+         device_features2.pNext = nullptr;
+         device_features2.features = (VkPhysicalDeviceFeatures)device_features;
+ 
+-        VkPhysicalDeviceVulkan11Features vk11_features;
++        // Zero-initialize: on Vulkan 1.1 drivers vkGetPhysicalDeviceFeatures2()
++        // leaves the 1.2 feature struct untouched, so uninitialized stack values
++        // would otherwise be mistaken for supported features.
++        VkPhysicalDeviceVulkan11Features vk11_features{};
+         vk11_features.pNext = nullptr;
+         vk11_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+         device_features2.pNext = &vk11_features;
+ 
+-        VkPhysicalDeviceVulkan12Features vk12_features;
++        VkPhysicalDeviceVulkan12Features vk12_features{};
+         vk12_features.pNext = nullptr;
+         vk12_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+         vk11_features.pNext = &vk12_features;
+@@ -4793,6 +4796,46 @@ vk_device ggml_vk_get_device(size_t idx) {
+             device_extensions.push_back("VK_KHR_cooperative_matrix");
+         }
+ #endif
++        // A Vulkan 1.1 device can expose 1.2 functionality through KHR extensions
++        // (Adreno 730 does). vkGetPhysicalDeviceFeatures2() fills
++        // VkPhysicalDeviceVulkan12Features, but a 1.1 driver ignores that struct
++        // at device creation, so the SPIR-V capabilities used by the quantized
++        // shaders stay disabled and createComputePipeline() returns ErrorUnknown.
++        // Enable the equivalent KHR extensions and feature structs explicitly.
++        const bool legacy_vk11 = device->properties.apiVersion < VK_API_VERSION_1_2;
++        VkPhysicalDeviceTimelineSemaphoreFeaturesKHR timeline_features{};
++        timeline_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES_KHR;
++        timeline_features.timelineSemaphore = VK_TRUE;
++        VkPhysicalDeviceBufferDeviceAddressFeaturesKHR bda_features{};
++        bda_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_KHR;
++        bda_features.bufferDeviceAddress = VK_TRUE;
++        VkPhysicalDeviceVulkanMemoryModelFeaturesKHR mm_features{};
++        mm_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES_KHR;
++        mm_features.vulkanMemoryModel = VK_TRUE;
++        if (legacy_vk11) {
++            auto has_ext2 = [&](const char * n) -> bool {
++                for (const auto & e : ext_props) {
++                    if (std::string(e.extensionName.data()) == n) return true;
++                }
++                return false;
++            };
++            if (has_ext2(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME)) {
++                last_struct->pNext = (VkBaseOutStructure *) &timeline_features;
++                last_struct = (VkBaseOutStructure *) &timeline_features;
++                device_extensions.push_back(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
++            }
++            if (has_ext2(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)) {
++                last_struct->pNext = (VkBaseOutStructure *) &bda_features;
++                last_struct = (VkBaseOutStructure *) &bda_features;
++                device_extensions.push_back(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
++            }
++            if (has_ext2(VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME)) {
++                last_struct->pNext = (VkBaseOutStructure *) &mm_features;
++                last_struct = (VkBaseOutStructure *) &mm_features;
++                device_extensions.push_back(VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME);
++            }
++        }
++
+         device->name = GGML_VK_NAME + std::to_string(idx);
+ 
+         device_create_info
+@@ -4802,6 +4845,44 @@ vk_device ggml_vk_get_device(size_t idx) {
+         device_create_info.setPNext(&device_features2);
+         device->device = device->physical_device.createDevice(device_create_info);
+ 
++        // Vulkan 1.1 devices (e.g. Adreno 730, apiVersion 1.1.128) do not implement
++        // the 1.2 core device entry points. vkGetDeviceProcAddr returns null and
++        // vkGetInstanceProcAddr(core) only yields loader trampolines that jump into
++        // unimplemented driver code. Prefer the KHR alias extensions on such
++        // devices; real 1.2+ devices keep normal core resolution.
++        auto & vkd = ggml_vk_default_dispatcher();
++        vkd.init(device->device);
++
++        const VkInstance vki   = (VkInstance) vk_instance.instance;
++        const VkDevice   vkdev = (VkDevice)   device->device;
++        const bool vk12_device = device->properties.apiVersion >= VK_API_VERSION_1_2;
++
++        auto gipa = [&](const char * n) -> PFN_vkVoidFunction { return vkGetInstanceProcAddr(vki, n); };
++        auto gdpa = [&](const char * n) -> PFN_vkVoidFunction { return vkGetDeviceProcAddr(vkdev, n); };
++        auto resolve12 = [&](const char * core, const char * khr) -> PFN_vkVoidFunction {
++            PFN_vkVoidFunction p = nullptr;
++            if (!vk12_device) { p = gipa(khr); if (!p) p = gdpa(khr); }
++            if (!p) p = gdpa(core);
++            if (!p) p = gipa(core);
++            if (!p) p = gipa(khr);
++            if (!p) p = gdpa(khr);
++            return p;
++        };
++        if (!vkd.vkWaitSemaphores)
++            vkd.vkWaitSemaphores = (PFN_vkWaitSemaphores) resolve12("vkWaitSemaphores", "vkWaitSemaphoresKHR");
++        if (!vkd.vkSignalSemaphore)
++            vkd.vkSignalSemaphore = (PFN_vkSignalSemaphore) resolve12("vkSignalSemaphore", "vkSignalSemaphoreKHR");
++        if (!vkd.vkGetSemaphoreCounterValue)
++            vkd.vkGetSemaphoreCounterValue = (PFN_vkGetSemaphoreCounterValue) resolve12("vkGetSemaphoreCounterValue", "vkGetSemaphoreCounterValueKHR");
++        if (!vkd.vkGetBufferDeviceAddress)
++            vkd.vkGetBufferDeviceAddress = (PFN_vkGetBufferDeviceAddress) resolve12("vkGetBufferDeviceAddress", "vkGetBufferDeviceAddressKHR");
++
++
++        // Safety net: if BDA still cannot be resolved, skip the BDA path.
++        if (device->buffer_device_address && !vkd.vkGetBufferDeviceAddress) {
++            device->buffer_device_address = false;
++        }
++
+         if (device->device_fault) {
+             device->pfn_vkGetDeviceFaultInfoEXT = (PFN_vkGetDeviceFaultInfoEXT)
+                 vkGetDeviceProcAddr(device->device, "vkGetDeviceFaultInfoEXT");

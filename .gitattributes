@@ -1,0 +1,6 @@
+# Keep text files LF in both the repository and the working tree.
+# The patch must stay byte-exact: CRLF would make `git apply` fail.
+* text=auto eol=lf
+# A .patch file's blank context lines are single spaces by diff-format design.
+*.patch -text whitespace=-trailing-space
+*.png binary

@@ -1,0 +1,34 @@
+# ---- Android / Gradle ----
+local.properties
+.gradle/
+build/
+app/build/
+app/.cxx/
+cli_build/build/
+captures/
+.externalNativeBuild/
+*.apk
+*.aab
+*.iml
+.idea/
+.DS_Store
+Thumbs.db
+
+# ---- Native build artifacts ----
+# NOTE: llama.cpp is a gitlink (submodule); its own files are not scanned here.
+*.o
+*.obj
+*.so
+*.a
+
+# ---- Local debug / diagnostic leftovers ----
+_*
+*.log
+*.before_cleanup
+
+# ---- Superseded iteration scripts ----
+cli_build/build_cli.ps1
+cli_build/build_cli2.ps1
+
+# ---- WorkBuddy workspace notes (local paths, device serials) ----
+.workbuddy/

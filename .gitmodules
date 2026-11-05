@@ -1,0 +1,6 @@
+[submodule "app/src/main/cpp/llama.cpp"]
+	path = app/src/main/cpp/llama.cpp
+	url = https://github.com/ggml-org/llama.cpp.git
+	branch = master
+	# The submodule is expected to be dirty: patches/ holds the applied fix.
+	ignore = dirty
