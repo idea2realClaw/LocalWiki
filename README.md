@@ -21,6 +21,7 @@ Release 里另有 `QwenAndroidLLM-gpu-<sha>.apk` 存档版。APK 用仓库内 `a
 手动触发：Actions → **Build GPU APK** → Run workflow，可指定 `gpu_layers`（99 / 0）与是否发布 Release。
 
 > 首次出包实测（2026-11-06）：run `42128212416`，windows-2022 全程 **9m12s**，产物 **70,792,759 B**，内含 `libggml-vulkan.so` 42,411,912 B；直链 `curl -L` 返回 **HTTP 200**（无需登录）。Release 资产另存带 commit sha 的存档版。
+> 复跑验证：run `42129541951` **全绿 6m44s**（含自动发布），`gpu-latest` 资产自动更新；公开仓库标准 runner 免费，冷构建约 7~9 分钟。
 
 ## 1. 实测状态
 
