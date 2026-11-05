@@ -26,10 +26,10 @@ class ChatViewModel : ViewModel() {
 
     fun loadModel(path: String) {
         if (handle != 0L) return
-        // S22+ (Adreno 730) 只支持 Vulkan 1.1，ggml master 的 Vulkan 后端要求 1.2
-        // （SPIR-V 1.5 量化 shader 在该驱动上 createComputePipeline 失败并 abort）。
-        // 因此默认走 CPU；换到 Vulkan 1.2+ 设备后可改回 99 启用 GPU 卸载。
-        handle = wrapper.loadModel(path, nGpuLayers = 0, nCtx = 4096)
+        // GPU 卸载层数由构建参数 -PgpuLayers 决定（默认 99 = 全部层走 Vulkan）。
+        // 需要 Vulkan 1.2+ 设备（如一加 13 / Adreno 830）；Vulkan 1.1 设备请
+        // 用 -PgpuLayers=0 重新构建，否则量化 shader 编译失败会 abort。
+        handle = wrapper.loadModel(path, nGpuLayers = BuildConfig.DEFAULT_GPU_LAYERS, nCtx = 4096)
         _status.value = if (handle != 0L) "模型已加载 (ctx=4096)" else "模型加载失败"
     }
 

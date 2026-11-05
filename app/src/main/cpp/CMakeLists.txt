@@ -10,7 +10,16 @@ add_subdirectory(llama.cpp)
 # 同时交叉编译时 Vulkan::Vulkan 的链接属性未正确传递 libvulkan.so，需显式链接 Vulkan
 # loader（提供 vkGetPhysicalDeviceFeatures2 等 Vulkan 1.1+ 符号），否则链接报 undefined symbol。
 if (ANDROID AND TARGET ggml-vulkan)
-    target_include_directories(ggml-vulkan PRIVATE D:/VulkanSDK/1.4.309.0/Include)
+    # Vulkan SDK root is passed by Gradle (-DVULKAN_SDK_ROOT) or comes from the
+    # VULKAN_SDK environment variable. CI installs the SDK to a different drive.
+    if (NOT VULKAN_SDK_ROOT)
+        if (DEFINED ENV{VULKAN_SDK})
+            set(VULKAN_SDK_ROOT "$ENV{VULKAN_SDK}")
+        else()
+            set(VULKAN_SDK_ROOT "D:/VulkanSDK/1.4.309.0")
+        endif()
+    endif()
+    target_include_directories(ggml-vulkan PRIVATE "${VULKAN_SDK_ROOT}/Include")
     target_link_libraries(ggml-vulkan PRIVATE vulkan)
     # Android 的 NDK libvulkan.so 桩（≤API27）只导出 Vulkan 1.0 符号，而 ggml-vulkan 直接
     # 静态调用 Vulkan 1.1+ 函数（如 vkGetPhysicalDeviceFeatures2）。这些符号由设备系统的

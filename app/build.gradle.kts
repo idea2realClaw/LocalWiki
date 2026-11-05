@@ -3,9 +3,32 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// Vulkan SDK root. Override with -PvulkanSdk=<path> or the VULKAN_SDK env var.
+// GitHub Actions installs the SDK and sets VULKAN_SDK explicitly.
+val vulkanSdk: String = (project.findProperty("vulkanSdk") as? String)
+    ?.replace('\\', '/')?.trimEnd('/')
+    ?: System.getenv("VULKAN_SDK")?.replace('\\', '/')?.trimEnd('/')
+    ?: "D:/VulkanSDK/1.4.309.0"
+
+// 0 = pure CPU, 99 = offload every layer to the Vulkan GPU backend.
+// Override per build with -PgpuLayers=<n> (CI passes 99 explicitly).
+val gpuLayers: Int = (project.findProperty("gpuLayers") as? String)?.toIntOrNull() ?: 99
+
 android {
     namespace = "com.idea2realclaw.qwenllm"
     compileSdk = 35
+
+    // Use the standard Android debug keystore committed to the repo so CI builds
+    // and local builds share one signature: `adb install -r` works without
+    // uninstalling. This is the public debug key only, never a release key.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
 
     defaultConfig {
         applicationId = "com.idea2realclaw.qwenllm"
@@ -19,6 +42,8 @@ android {
             abiFilters += "arm64-v8a"
         }
 
+        buildConfigField("int", "DEFAULT_GPU_LAYERS", gpuLayers.toString())
+
         externalNativeBuild {
             cmake {
                 cppFlags += "-std=c++17"
@@ -29,10 +54,11 @@ android {
                     "-DLLAMA_BUILD_TESTS=OFF",
                     "-DLLAMA_BUILD_EXAMPLES=OFF",
                     // 显式指明 Vulkan SDK 根目录，使 find_package(Vulkan) 能定位 glslc
-                    "-DCMAKE_PREFIX_PATH=D:/VulkanSDK/1.4.309.0",
-                    // 直接指定 SPIRV-Headers 配置目录（绕过 Gradle/cmake 缓存的 NOTFOUND，
-                    // Vulkan SDK 1.4.309.0 把 config 平铺在 Lib/cmake/ 下，已挪到 Lib/cmake/SPIRV-Headers/）
-                    "-DSPIRV-Headers_DIR=D:/VulkanSDK/1.4.309.0/Lib/cmake/SPIRV-Headers",
+                    "-DCMAKE_PREFIX_PATH=$vulkanSdk",
+                    // 直接指定 SPIRV-Headers 配置目录（绕过 Gradle/cmake 缓存的 NOTFOUND）
+                    "-DSPIRV-Headers_DIR=$vulkanSdk/Lib/cmake/SPIRV-Headers",
+                    // 传给 native CMakeLists，用于补 vulkan.hpp 头文件路径
+                    "-DVULKAN_SDK_ROOT=$vulkanSdk",
                     // 哨兵变量：仅用于改变 Gradle 配置 hash，强制重新 configure。
                     // 使主机端 vulkan-shaders-gen 在 MSVC/cl.exe 环境下重新检测编译器，
                     // 而非复用上次 NDK clang 的缓存 host-toolchain.cmake。
@@ -59,6 +85,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     composeOptions {

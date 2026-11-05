@@ -11,8 +11,8 @@ class LlamaWrapper {
         }
     }
 
-    /** 加载 GGUF 模型，返回句柄（0 = 失败）。默认 CPU；nGpuLayers=99 全部层卸载 GPU（需 Vulkan 1.2+ 设备）。 */
-    external fun loadModel(path: String, nGpuLayers: Int = 0, nCtx: Int = 4096): Long
+    /** 加载 GGUF 模型，返回句柄（0 = 失败）。nGpuLayers=99 全部层卸载 GPU（需 Vulkan 1.2+ 设备），0 为纯 CPU。 */
+    external fun loadModel(path: String, nGpuLayers: Int = 99, nCtx: Int = 4096): Long
 
     /** 阻塞式生成，逐 token 通过 callback 回调。请在 Dispatchers.IO 中调用。 */
     external fun generate(handle: Long, prompt: String, callback: TokenCallback)

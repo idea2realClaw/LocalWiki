@@ -4,3 +4,7 @@
 # A .patch file's blank context lines are single spaces by diff-format design.
 *.patch -text whitespace=-trailing-space
 *.png binary
+*.jar binary
+*.keystore binary
+# cmd.exe needs CRLF in the working tree for .bat files (stored as LF in git).
+*.bat text eol=crlf
