@@ -207,17 +207,29 @@ jobs:
 
           Install: adb install -r QwenAndroidLLM-gpu.apk
           "@
-          gh release view $tag 2>$null | Out-Null
-          if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --title 'GPU APK (latest main)' `
-              --notes $notes --prerelease --target $env:GITHUB_SHA
-          } else {
-            gh release edit $tag --notes $notes
+          # GitHub's releases API occasionally returns HTTP 500 on create.
+          # Re-evaluate release state on every attempt, so a partially created
+          # release is edited instead of re-created, and uploads are retried.
+          $published = $false
+          for ($attempt = 1; $attempt -le 4; $attempt++) {
+            gh release view $tag 2>$null | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+              gh release create $tag --title 'GPU APK (latest main)' `
+                --notes $notes --prerelease --target $env:GITHUB_SHA
+            } else {
+              gh release edit $tag --notes $notes
+            }
+            if ($LASTEXITCODE -ne 0) {
+              Write-Warning "release create/edit failed (attempt $attempt)"
+              Start-Sleep -Seconds 10
+              continue
+            }
+            gh release upload $tag 'QwenAndroidLLM-gpu.apk' "QwenAndroidLLM-gpu-$sha.apk" --clobber
+            if ($LASTEXITCODE -eq 0) { $published = $true; break }
+            Write-Warning "release upload failed (attempt $attempt)"
+            Start-Sleep -Seconds 10
           }
-          if ($LASTEXITCODE -ne 0) { throw "gh release failed with $LASTEXITCODE" }
-
-          gh release upload $tag 'QwenAndroidLLM-gpu.apk' "QwenAndroidLLM-gpu-$sha.apk" --clobber
-          if ($LASTEXITCODE -ne 0) { throw "gh release upload failed with $LASTEXITCODE" }
+          if (-not $published) { throw "failed to publish APK after 4 attempts" }
 
           $url = "https://github.com/${{ github.repository }}/releases/download/$tag/QwenAndroidLLM-gpu.apk"
           Write-Host "DOWNLOAD_URL=$url"

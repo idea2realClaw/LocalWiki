@@ -20,6 +20,8 @@ Release 里另有 `QwenAndroidLLM-gpu-<sha>.apk` 存档版。APK 用仓库内 `a
 
 手动触发：Actions → **Build GPU APK** → Run workflow，可指定 `gpu_layers`（99 / 0）与是否发布 Release。
 
+> 首次出包实测（2026-11-06）：run `42128212416`，windows-2022 全程 **9m12s**，产物 **70,792,759 B**，内含 `libggml-vulkan.so` 42,411,912 B；直链 `curl -L` 返回 **HTTP 200**（无需登录）。Release 资产另存带 commit sha 的存档版。
+
 ## 1. 实测状态
 
 | 路径 | 设备 | 结果 | 关键数字 |
@@ -94,6 +96,11 @@ adb install -r app\build\outputs\apk\debug\app-debug.apk
 | 补丁 | `scripts/apply-llama-patch.ps1` |
 | 构建 | VS DevShell（`cl.exe`）+ `gradlew assembleDebug -PgpuLayers=99` |
 | 发布 | artifact + `gpu-latest` Release（公开直链，无需登录） |
+
+首次 CI 实测踩过两个坑，均已修进工作流：
+
+1. `Get-Content | ... | Set-Content` 指向同一文件会持有读句柄，Windows 报 `The process cannot access the file` → 先用 `@()` 缓冲到数组再写。
+2. GitHub Releases API 偶发 **HTTP 500**（`POST /repos/.../releases`）→ 发布步骤改为最多 4 次重试，每轮重新判定 release 状态（create / edit）后再 `--clobber` 上传。
 
 ## 5. 补丁内容
 
