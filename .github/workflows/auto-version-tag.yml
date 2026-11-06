@@ -1,0 +1,92 @@
+name: Auto version tag
+
+# Bump the patch version on every version-changing push to main:
+# 0.0.1 -> 0.0.2 -> 0.0.3 ...
+#
+# Trigger scope mirrors build-gpu-apk.yml (docs / workspace notes are NOT
+# version changes). The "gpu-latest" tag is a Release marker, not a version,
+# and is deliberately excluded by the x.y.z regex below.
+#
+# A tag pushed with GITHUB_TOKEN does not start another workflow, so there is
+# no tag -> build -> tag loop.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - '.workbuddy/**'
+      # Editing this workflow itself is configuration, not an app version bump.
+      - '.github/workflows/auto-version-tag.yml'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Compute the next tag only, do not create it'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+# Queue concurrent pushes instead of letting two runs compute the same number.
+concurrency:
+  group: auto-version-tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: bump x.y.z patch tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout with all tags
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute next patch tag
+        id: next
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Only numeric x.y.z tags count; "gpu-latest" and friends are ignored.
+          latest=$(git tag --list | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
+          if [ -z "$latest" ]; then latest="0.0.0"; fi
+          IFS='.' read -r major minor patch <<< "$latest"
+          next="$major.$minor.$((10#$patch + 1))"
+
+          head_tagged=$(git tag --points-at "$GITHUB_SHA" \
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)
+
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          echo "next=$next" >> "$GITHUB_OUTPUT"
+          if [ -n "$head_tagged" ]; then
+            echo "head_tagged=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "head_tagged=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "latest=$latest -> next=$next ; HEAD already tagged: ${head_tagged:-no}"
+          echo "### Auto version tag: \`$latest\` -> \`$next\` (HEAD tagged: ${head_tagged:-no})" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dry run notice
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true }}
+        run: echo "Dry run: no tag created. Next would be ${{ steps.next.outputs.next }}"
+
+      - name: Create and push tag
+        # Skip when this commit already carries a numeric tag (e.g. the manual
+        # 0.0.1 baseline), and skip on workflow_dispatch dry runs.
+        if: ${{ steps.next.outputs.head_tagged != 'true' && (github.event_name != 'workflow_dispatch' || inputs.dry_run != true) }}
+        env:
+          NEXT_TAG: ${{ steps.next.outputs.next }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$NEXT_TAG" "$GITHUB_SHA" \
+            -m "Auto version $NEXT_TAG (commit $GITHUB_SHA)"
+          git push origin "refs/tags/$NEXT_TAG"
+          echo "Created tag $NEXT_TAG on $GITHUB_SHA"

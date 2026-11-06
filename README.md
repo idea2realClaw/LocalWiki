@@ -26,6 +26,24 @@ Release 里另有 `QwenAndroidLLM-gpu-<sha>.apk` 存档版。APK 用仓库内 `a
 > 首次出包实测（2026-11-06）：run `42128212416`，windows-2022 全程 **9m12s**，产物 **70,792,759 B**，内含 `libggml-vulkan.so` 42,411,912 B；直链 `curl -L` 返回 **HTTP 200**（无需登录）。Release 资产另存带 commit sha 的存档版。
 > 复跑验证：run `42129541951` **全绿 6m44s**（含自动发布），`gpu-latest` 资产自动更新；公开仓库标准 runner 免费，冷构建约 7~9 分钟。
 
+## 0.1 版本 tag（自动递增）
+
+当前版本 **`0.0.1`**。之后每次 push 到 `main` 且改动了代码/构建配置，
+`.github/workflows/auto-version-tag.yml` 自动把 patch 号 +1：
+`0.0.1 → 0.0.2 → 0.0.3 …`（支持两位数，如 `0.0.9 → 0.0.10`）。
+
+| 规则 | 说明 |
+|---|---|
+| 触发范围 | 与 GPU 出包一致：忽略 `**.md`、`.workbuddy/**`；改本 workflow 自身也不算版本修改 |
+| 只认数字 tag | 正则 `^[0-9]+\.[0-9]+\.[0-9]+$`，`gpu-latest` 这类 Release 标记**不参与**版本序列 |
+| 防重复 | 同一 commit 已有数字 tag 则跳过；并发 push 排队执行，不会撞同一个号 |
+| 不循环 | 用 `GITHUB_TOKEN` 推送的 tag 不会再触发 workflow |
+| 手动验证 | Actions → **Auto version tag** → Run workflow，勾 `dry_run` 只打印下一个号、不创建 tag |
+| 手动跳级 | `git tag -a 0.1.0 -m "..." && git push origin 0.1.0`，之后会从 `0.1.0` 继续 `+1` |
+
+数字 tag 标记版本序列；APK 下载仍走 `gpu-latest` 固定直链 + 带 commit sha 的存档资产。
+自动打 tag 与 GPU 构建是**两个独立 workflow**：tag 不等待构建结果，构建失败不会回滚已打的 tag。
+
 ## 1. 实测状态
 
 | 路径 | 设备 | 结果 | 关键数字 |
