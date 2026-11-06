@@ -44,6 +44,12 @@ Release 里另有 `QwenAndroidLLM-gpu-<sha>.apk` 存档版。APK 用仓库内 `a
 数字 tag 标记版本序列；APK 下载仍走 `gpu-latest` 固定直链 + 带 commit sha 的存档资产。
 自动打 tag 与 GPU 构建是**两个独立 workflow**：tag 不等待构建结果，构建失败不会回滚已打的 tag。
 
+> 实测（2026-11-06）：手工打 `0.0.1` → run `42234715436`（**5s 全绿**）日志
+> `latest=0.0.1 -> next=0.0.2` / `Created tag 0.0.2 on d61f303`；dry_run run `42234792225`
+> 输出 `0.0.2 -> 0.0.3` 且跳过创建，`gpu-latest` 始终未参与版本序列。
+> 踩坑：首次提交时 `run: echo "Dry run: ..."` 是 plain scalar，串里的 `: ` 会让整个
+> workflow YAML 解析失败（两次 0s failure）；改成 `run: |` block scalar 后通过。
+
 ## 1. 实测状态
 
 | 路径 | 设备 | 结果 | 关键数字 |
