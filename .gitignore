@@ -30,5 +30,8 @@ _*
 cli_build/build_cli.ps1
 cli_build/build_cli2.ps1
 
+# ---- Agent JVM regression (downloaded jar + compiled test classes) ----
+tests/.cache/
+
 # ---- WorkBuddy workspace notes (local paths, device serials) ----
 .workbuddy/
