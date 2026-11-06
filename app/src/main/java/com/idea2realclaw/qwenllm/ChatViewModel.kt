@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** role: user / assistant / tool / status；[meta] 是气泡上方的轮次或工具名标签。 */
 data class ChatMessage(val role: String, val content: String, val meta: String = "")
@@ -47,27 +48,32 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private var handle: Long = 0
     private val wrapper = LlamaWrapper()
 
-    /** App 私有目录，无需任何存储权限：/Android/data/<pkg>/files/workspace/ */
-    private val tools = WorkspaceTools(File(app.getExternalFilesDir(null), "workspace"))
+    /** App 私有目录，无需任何存储权限：/Android/data/<pkg>/files/workspace/；外部卷不可用时退回内部 filesDir。 */
+    private val tools = WorkspaceTools(File(app.getExternalFilesDir(null) ?: app.filesDir, "workspace"))
     private val systemPrompt = AgentWire.systemPrompt(tools.specs)
 
     /** wire 历史，与 UI 消息分开：UI 有工具气泡/状态气泡，wire 只放 user/assistant 文本。 */
     private val turns = mutableListOf<ChatTurn>()
 
     @Volatile private var cancelled = false
+    private val loading = AtomicBoolean(false)   // 防止加载期间双击并发载入两份 2GB 模型
     private var genJob: Job? = null
     private var genDone = CountDownLatch(0)
 
     fun loadModel(path: String) {
-        if (handle != 0L || _isBusy.value) return
+        if (handle != 0L || _isBusy.value || !loading.compareAndSet(false, true)) return
         _status.value = "正在加载模型…"
         // 2GB 模型加载放 IO，避免阻塞主线程触发 ANR（原实现直接在 UI 线程加载）。
         viewModelScope.launch(Dispatchers.IO) {
-            val h = wrapper.loadModel(path, nGpuLayers = BuildConfig.DEFAULT_GPU_LAYERS, nCtx = 4096)
-            handle = h
-            _status.value = if (h != 0L)
-                "模型已加载 · Agent 就绪（${tools.specs.size} 个本地工具）"
-            else "模型加载失败，请确认 gguf 已放到 files/models/"
+            try {
+                val h = wrapper.loadModel(path, nGpuLayers = BuildConfig.DEFAULT_GPU_LAYERS, nCtx = 4096)
+                handle = h
+                _status.value = if (h != 0L)
+                    "模型已加载 · Agent 就绪（${tools.specs.size} 个本地工具）"
+                else "模型加载失败，请确认 gguf 已放到 files/models/"
+            } finally {
+                loading.set(false)
+            }
         }
     }
 
