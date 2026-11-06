@@ -72,13 +72,14 @@ jobs:
             >> "$GITHUB_STEP_SUMMARY"
 
       - name: Dry run notice
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true }}
-        run: echo "Dry run: no tag created. Next would be ${{ steps.next.outputs.next }}"
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}
+        run: |
+          echo "Dry run: no tag created. Next would be ${{ steps.next.outputs.next }}"
 
       - name: Create and push tag
         # Skip when this commit already carries a numeric tag (e.g. the manual
         # 0.0.1 baseline), and skip on workflow_dispatch dry runs.
-        if: ${{ steps.next.outputs.head_tagged != 'true' && (github.event_name != 'workflow_dispatch' || inputs.dry_run != true) }}
+        if: ${{ steps.next.outputs.head_tagged != 'true' && (github.event_name != 'workflow_dispatch' || github.event.inputs.dry_run != 'true') }}
         env:
           NEXT_TAG: ${{ steps.next.outputs.next }}
         shell: bash

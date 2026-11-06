@@ -28,7 +28,7 @@ Release 里另有 `QwenAndroidLLM-gpu-<sha>.apk` 存档版。APK 用仓库内 `a
 
 ## 0.1 版本 tag（自动递增）
 
-当前版本 **`0.0.1`**。之后每次 push 到 `main` 且改动了代码/构建配置，
+起始版本 **`0.0.1`**（最新数字 tag 由 workflow 自动维护）。之后每次 push 到 `main` 且改动了代码/构建配置，
 `.github/workflows/auto-version-tag.yml` 自动把 patch 号 +1：
 `0.0.1 → 0.0.2 → 0.0.3 …`（支持两位数，如 `0.0.9 → 0.0.10`）。
 
