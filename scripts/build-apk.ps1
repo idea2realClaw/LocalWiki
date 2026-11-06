@@ -11,12 +11,17 @@
     nGpuLayers: 99 = offload every layer to Vulkan (default), 0 = CPU only.
     CPU builds are required on Vulkan 1.1 devices such as the S22+.
 
+.PARAMETER WindowHeightPx
+    App window height in physical pixels (default 900). Baked into
+    BuildConfig.WINDOW_HEIGHT_PX; MainActivity applies it with WindowManager.
+
 .PARAMETER VulkanSdk
     Override the Vulkan SDK root. Defaults to the VULKAN_SDK env var, then
     the D:/VulkanSDK/1.4.309.0 default baked into app/build.gradle.kts.
 #>
 param(
     [int]    $GpuLayers = 99,
+    [int]    $WindowHeightPx = 900,
     [string] $VulkanSdk = $env:VULKAN_SDK
 )
 
@@ -41,7 +46,11 @@ if (-not $gradle) {
     if ($found) { $gradle = $found.Source }
 }
 
-$gradleArgs = @("assembleDebug", "--console=plain", "--no-daemon", "-PgpuLayers=$GpuLayers")
+$gradleArgs = @(
+    "assembleDebug", "--console=plain", "--no-daemon",
+    "-PgpuLayers=$GpuLayers",
+    "-PwindowHeightPx=$WindowHeightPx"
+)
 if ($VulkanSdk) { $gradleArgs += "-PvulkanSdk=$VulkanSdk" }
 
 if (Test-Path $gradlew) {
@@ -55,4 +64,4 @@ if (Test-Path $gradlew) {
 }
 if ($LASTEXITCODE -ne 0) { throw "assembleDebug failed with exit code $LASTEXITCODE" }
 
-Write-Host "APK: $repoRoot\app\build\outputs\apk\debug\app-debug.apk (gpuLayers=$GpuLayers)" -ForegroundColor Green
+Write-Host "APK: $repoRoot\app\build\outputs\apk\debug\app-debug.apk (gpuLayers=$GpuLayers, windowHeightPx=$WindowHeightPx)" -ForegroundColor Green

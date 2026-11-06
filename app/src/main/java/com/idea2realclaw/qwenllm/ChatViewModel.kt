@@ -1,6 +1,7 @@
 package com.idea2realclaw.qwenllm
 
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.idea2realclaw.qwenllm.agent.AgentWire
@@ -42,7 +43,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val _isBusy = MutableStateFlow(false)
     val isBusy = _isBusy.asStateFlow()
 
-    private val _status = MutableStateFlow("未加载模型")
+    private val _status = MutableStateFlow("未加载模型 · 点「加载模型」自动下载")
     val status = _status.asStateFlow()
 
     private var handle: Long = 0
@@ -56,26 +57,72 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val turns = mutableListOf<ChatTurn>()
 
     @Volatile private var cancelled = false
-    private val loading = AtomicBoolean(false)   // 防止加载期间双击并发载入两份 2GB 模型
+    @Volatile private var downloadCancelled = false
+    private val loading = AtomicBoolean(false)   // 防加载/下载期间双击并发载入两份 2GB 模型
     private var genJob: Job? = null
     private var genDone = CountDownLatch(0)
 
-    fun loadModel(path: String) {
+    /**
+     * 一键准备模型：文件已存在且有效 → 直接加载；否则先下载（多源降级 + 断点续传 + 校验），
+     * 下载完成后自动加载。状态栏实时显示下载百分比 / MB，忙时点「停止」可取消并保留断点。
+     */
+    fun loadModel(context: Context) {
         if (handle != 0L || _isBusy.value || !loading.compareAndSet(false, true)) return
-        _status.value = "正在加载模型…"
-        // 2GB 模型加载放 IO，避免阻塞主线程触发 ANR（原实现直接在 UI 线程加载）。
+        downloadCancelled = false
+        _isBusy.value = true
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val h = wrapper.loadModel(path, nGpuLayers = BuildConfig.DEFAULT_GPU_LAYERS, nCtx = 4096)
+                val app = context.applicationContext
+                val file = ModelDownloader.modelFile(app)
+                if (ModelDownloader.isValid(file)) {
+                    _status.value = "已有模型（${file.length()} B）· 正在加载…"
+                } else {
+                    _status.value = "首次使用：正在下载模型（约 2.0 GB）…"
+                    val f = ModelDownloader.download(
+                        app,
+                        onProgress = { p ->
+                            _status.value = buildString {
+                                append("下载模型 ")
+                                if (p.total > 0) append("${(p.bytes * 100 / p.total).toInt()}% · ")
+                                append(mb(p.bytes))
+                                if (p.total > 0) append(" / ${mb(p.total)}")
+                                if (p.resumed) append(" · 续传")
+                                if (p.sourceIndex > 0) append(" · 备用源 ${p.sourceIndex + 1}")
+                            }
+                        },
+                        isCancelled = { downloadCancelled }
+                    )
+                    _status.value = "下载完成（${f.length()} B）· 正在加载…"
+                }
+
+                if (downloadCancelled) {
+                    _status.value = "已取消 · 断点保留，再点「加载模型」继续"
+                    return@launch
+                }
+
+                // 2GB 模型加载放 IO，避免阻塞主线程触发 ANR。
+                val h = wrapper.loadModel(
+                    file.absolutePath,
+                    nGpuLayers = BuildConfig.DEFAULT_GPU_LAYERS,
+                    nCtx = 4096
+                )
                 handle = h
                 _status.value = if (h != 0L)
                     "模型已加载 · Agent 就绪（${tools.specs.size} 个本地工具）"
-                else "模型加载失败，请确认 gguf 已放到 files/models/"
+                else "模型加载失败，请检查 gguf 或清空 models/ 后重试下载"
+            } catch (e: DownloadCancelledException) {
+                _status.value = "已取消 · 断点保留，再点「加载模型」继续"
+            } catch (e: Exception) {
+                _status.value = "模型准备失败：${e.message}"
+                addMessage(ChatMessage("status", "模型准备失败：${e.message}"))
             } finally {
                 loading.set(false)
+                _isBusy.value = false
             }
         }
     }
+
+    private fun mb(bytes: Long): String = "${bytes / 1024 / 1024} MB"
 
     fun send(prompt: String) {
         if (handle == 0L || prompt.isBlank() || _isBusy.value) return
@@ -176,7 +223,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
         _status.value = when {
             cancelled -> "已停止 · Agent 就绪"
-            handle == 0L -> "未加载模型"
+            handle == 0L -> "未加载模型 · 点「加载模型」自动下载"
             else -> "Agent 就绪（${tools.specs.size} 个本地工具 · workspace）"
         }
     }
@@ -184,6 +231,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun stop() {
         if (!_isBusy.value) return
         cancelled = true
+        downloadCancelled = true   // 下载阶段生效；保留 .part 供续传
         if (handle != 0L) wrapper.stopGenerate(handle)   // 原子标志，JNI 在下一个 token 边界退出
         _status.value = "正在停止…"
     }
@@ -287,6 +335,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         stop()
+        downloadCancelled = true
         genJob?.cancel()
         // generate 是阻塞 JNI，cancel 协程不会中断它。等生成线程真正退出再 freeModel，
         // 否则会 use-after-free（原实现直接 freeModel 有这个隐患）。

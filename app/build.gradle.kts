@@ -14,6 +14,9 @@ val vulkanSdk: String = (project.findProperty("vulkanSdk") as? String)
 // Override per build with -PgpuLayers=<n> (CI passes 99 explicitly).
 val gpuLayers: Int = (project.findProperty("gpuLayers") as? String)?.toIntOrNull() ?: 99
 
+// App window height in *physical pixels* (not dp). Override with -PwindowHeightPx=<n>.
+val windowHeightPx: Int = (project.findProperty("windowHeightPx") as? String)?.toIntOrNull() ?: 900
+
 android {
     namespace = "com.idea2realclaw.qwenllm"
     compileSdk = 35
@@ -43,6 +46,7 @@ android {
         }
 
         buildConfigField("int", "DEFAULT_GPU_LAYERS", gpuLayers.toString())
+        buildConfigField("int", "WINDOW_HEIGHT_PX", windowHeightPx.toString())
 
         externalNativeBuild {
             cmake {

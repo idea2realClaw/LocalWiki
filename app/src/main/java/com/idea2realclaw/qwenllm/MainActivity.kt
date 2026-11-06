@@ -1,6 +1,9 @@
 package com.idea2realclaw.qwenllm
 
+import android.content.res.Configuration
 import android.os.Bundle
+import android.view.Gravity
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
@@ -20,11 +23,32 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        applyWindowHeight()
         setContent {
             MaterialTheme {
                 ChatScreen()
             }
         }
+        // DecorView 挂到 WindowManager 后系统会重算窗口尺寸，再压一次确保 900px 生效。
+        window.decorView.post { applyWindowHeight() }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // 旋屏/分屏后系统可能重置 LayoutParams，重新压高度。
+        window.decorView.post { applyWindowHeight() }
+    }
+
+    /**
+     * 窗口高度 = [BuildConfig.WINDOW_HEIGHT_PX] **物理像素**（默认 900，非 dp），
+     * 宽度铺满、顶部对齐。可用 `-PwindowHeightPx=<n>` 在构建时覆盖。
+     */
+    private fun applyWindowHeight() {
+        val lp = window.attributes
+        lp.width = WindowManager.LayoutParams.MATCH_PARENT
+        lp.height = BuildConfig.WINDOW_HEIGHT_PX
+        lp.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+        window.attributes = lp
     }
 }
 
@@ -50,12 +74,8 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                 actions = {
                     TextButton(onClick = { vm.selfTest() }, enabled = !isBusy) { Text("自测") }
                     TextButton(onClick = { vm.clearChat() }, enabled = !isBusy) { Text("清空") }
-                    TextButton(onClick = {
-                        val f = ModelDownloader.modelFile(
-                            context, "qwen3.5-4b-q4_k_m.gguf"
-                        )
-                        vm.loadModel(f.absolutePath)
-                    }, enabled = !isBusy) { Text("加载模型") }
+                    // 一键：模型不存在就下载（断点续传 + 校验），下载完自动加载；已存在直接加载。
+                    TextButton(onClick = { vm.loadModel(context) }, enabled = !isBusy) { Text("加载模型") }
                 }
             )
         },

@@ -6,7 +6,9 @@ Agent 能力（工具调用协议 / Skills 思路 / 本地文件工具 / system 
 
 > **当前默认 GPU 版**（`nGpuLayers = 99`），目标设备为 **Vulkan 1.2+** 手机，如一加 13 / Adreno 830。
 > Vulkan 1.1 设备（Samsung S22+ / Adreno 730）请用 `-PgpuLayers=0` 重编成 CPU 版。
-> 模型 `qwen3.5-4b-q4_k_m.gguf`（实际为 Qwen2.5-3B-Instruct Q4_K_M，2,104,932,768 B）不含在仓库内。
+> 模型 `qwen3.5-4b-q4_k_m.gguf`（实际为 Qwen2.5-3B-Instruct Q4_K_M，2,104,932,768 B）不含在仓库内，
+> 首次点顶栏「加载模型」App 会**自动下载并加载**（多源降级 + 断点续传，详见第 9.7 节）。
+> App 窗口高度固定 **900 物理像素**（非 dp，顶部对齐），可用 `-PwindowHeightPx=<n>` 覆盖。
 
 ## 0. 直接下载 CI 编好的 GPU APK
 
@@ -66,14 +68,16 @@ git submodule update --init --recursive
 .\scripts\apply-llama-patch.ps1
 # Linux/macOS: bash scripts/apply-llama-patch.sh
 
-# 3) 把 GGUF 放到 App 外部目录
+# 3) 模型不用手动放：装完 APK 点顶栏「加载模型」即自动下载（约 2.0 GB）并加载。
+#    离线/省流量场景仍可预先推送，跳过运行时下载：
 adb push qwen3.5-4b-q4_k_m.gguf /storage/emulated/0/Android/data/com.idea2realclaw.qwenllm/files/models/
 
-# 4) 构建 APK（脚本进 VS DevShell 提供 cl.exe；默认 GPU 99 层）
+# 4) 构建 APK（脚本进 VS DevShell 提供 cl.exe；默认 GPU 99 层、窗口 900px）
 .\scripts\build-apk.ps1
 
-# 4b) 要 CPU 版：
+# 4b) 要 CPU 版 / 改窗口高度：
 .\scripts\build-apk.ps1 -GpuLayers 0
+.\scripts\build-apk.ps1 -GpuLayers 99 -WindowHeightPx 1200
 
 # 5) 安装
 adb install -r app\build\outputs\apk\debug\app-debug.apk
@@ -138,7 +142,8 @@ adb shell "run-as com.idea2realclaw.qwenllm /data/data/com.idea2realclaw.qwenllm
 
 - GPU 路径在 Vulkan 1.1 设备上不可用（见第 1 节）；上 GPU 需 Vulkan 1.2+ 设备。
 - 一加 13 的 GPU 推理尚未真机验证：加载模型 → 输入 → 发送，需观察 logcat 是否出现 `ggml_vulkan: Found 1 Vulkan devices`、GPU 层卸载日志与 token/s。
-- 仓库不含模型文件；模型需自行下载并推送到设备。
+- 仓库不含模型文件；首次使用需联网下载约 2.0 GB（也可 adb push 离线预置）。三个下载源的 `Range` / GGUF magic 已实测，但 **2 GB 全量下载 + 真机加载尚未在设备上跑通**（见 9.7）。
+- 窗口高度是**物理像素**而非 dp：高密度屏上 900px 约占屏幕 1/3；横屏/分屏/软键盘弹出时的布局仍需真机确认。
 - CI 产物是 debug 签名，不能上架应用商店；每次 Release 覆盖同一文件名，旧版在带 sha 的存档 APK 里。
 - `app/debug.keystore` 是 Android 标准公开调试密钥（密码 `android`），**仅用于 debug 签名，切勿用作发布密钥**。
 
@@ -146,7 +151,7 @@ adb shell "run-as com.idea2realclaw.qwenllm /data/data/com.idea2realclaw.qwenllm
 
 ```
 .github/workflows/           GPU APK CI 工作流
-app/src/main/java/...        Compose UI / ViewModel(ReAct) / JNI 声明 / 模型路径
+app/src/main/java/...        Compose UI / ViewModel(ReAct) / JNI 声明 / ModelDownloader
 app/src/main/java/.../agent/ ToolModels / ToolCallParser / AgentWire / WorkspaceTools
 app/src/main/cpp/            llm_bridge.cpp、CMakeLists.txt、llama.cpp(gitlink)
 app/debug.keystore           统一 debug 签名（CI 与本地一致）
@@ -154,7 +159,7 @@ patches/                     ggml-vulkan 兼容性补丁
 scripts/                     补丁应用、APK 构建脚本
 gradle/wrapper/              Gradle 8.10.2 wrapper
 cli_build/                   离线 llama-simple 交叉编译工程
-tests/                       Agent 协议/工具层 JVM 回归（AgentSelfTest.java + ps1）
+tests/                       JVM 回归：Agent 协议/工具层 + ModelDownloader 断点续传（含 Android Context stub）
 ```
 
 ## 9. 端侧 Agent（移植自 Zagent）
@@ -230,7 +235,7 @@ tests/                       Agent 协议/工具层 JVM 回归（AgentSelfTest.j
 adb shell mkdir -p /sdcard/Android/data/com.idea2realclaw.qwenllm/files/workspace
 adb push notes.md /sdcard/Android/data/com.idea2realclaw.qwenllm/files/workspace/notes.md
 
-# 装 APK → 加载模型 → 试问：
+# 装 APK → 点顶栏「加载模型」（首次自动下载 ~2.0 GB，状态栏显示进度）→ 试问：
 #   "workspace 里有哪些 md 文件？挑一个总结内容"
 #   "把刚才的总结写到 summary.md"
 # 观察 logcat：
@@ -266,3 +271,40 @@ Windows 路径分隔符导致 glob/grep 语义漂移、`include="*.md"` 未按�
 - 第二批可接：SKILL.md 技能发现/热重载、工具并行执行（`_tool_round_executor.py`）、
   子代理、审计日志、策略热重载。
 - 端侧目前无向量检索 / embedding，「LocalWiki」的知识库部分仍是下一步。
+
+### 9.7 窗口高度与模型自动下载（2026-11-06）
+
+**窗口 900px**：`MainActivity.applyWindowHeight()` 用 `WindowManager.LayoutParams` 把窗口高度设为
+`BuildConfig.WINDOW_HEIGHT_PX = 900` **物理像素**（非 dp），`width = MATCH_PARENT`、`gravity = TOP`；
+`onCreate` 设一次、DecorView 挂载后 `post` 再压一次、`onConfigurationChanged` 旋屏后再压，
+防止系统重算尺寸覆盖。构建时用 `-PwindowHeightPx=<n>`（脚本参数 `-WindowHeightPx <n>`）覆盖。
+
+**一键下载 + 加载**：顶栏「加载模型」→ `ChatViewModel.loadModel(context)`：
+
+| 步骤 | 行为 |
+|---|---|
+| 已有文件 | `ModelDownloader.isValid()` 校验 ≥ 1 GiB + `GGUF` magic，通过则直接加载 |
+| 首次使用 | 按 ModelScope → HuggingFace → hf-mirror 逐源降级，写入 `files/models/*.gguf.part` |
+| 断点续传 | 带 `Range: bytes=N-`，服务器 `206` 时追加写；中断/失败保留 `.part`，下次点击接着下 |
+| 完整性 | 由 `Content-Range` / `Content-Length` 得到总长，下完比对字节数 + magic，再原子 rename |
+| 自动加载 | 校验通过立刻 `wrapper.loadModel(...)`，无需二次点击 |
+| 进度/取消 | 状态栏显示 `百分比 · 已下/总量 MB · 续传 · 备用源`；「停止」取消下载并保留断点 |
+
+`INTERNET` 权限本来就在 Manifest 里；`files/models/` 是 App 私有目录，不需要存储权限。
+离线场景仍可 `adb push` 同名文件到该目录，跳过运行时下载。
+
+**下载源实测（2026-11-06，本机 curl；非真机全量下载）**：
+
+| 源 | 实测结果 |
+|---|---|
+| HF `Qwen/Qwen2.5-3B-Instruct-GGUF` resolve | `302 → cdn`，最终 `content-length: 2104932768`；`Range: bytes=0-15` → `206 / 16 B`；前 4 字节 `GGUF` |
+| ModelScope 同名 repo（默认主源，国内直连） | `Range: bytes=0-15` → `206 / 16 B`，`content-type: application/octet-stream`，前 4 字节 `GGUF` |
+| hf-mirror | `308` 重定向回 huggingface.co，最终同样 `2104932768 B`（仅作兜底） |
+
+**回归**：`tests/run-downloader-selftest.ps1` 在 JVM 上跑真实 Kotlin `.class`，用 JDK 内置
+HttpServer 模拟支持 `Range` 的 GGUF 源，验证 `Content-Range` 解析、magic/体积校验、真实 `206`
+续传 → 完整性 → 原子改名、取消保留 `.part`，**15/15 PASS**（不联网、不传 2 GB，仅本机回环）；
+`tests/run-agent-selftest.ps1` 仍为 **24/24 PASS**。
+
+**边界**：2 GB 全量下载 + 真机自动加载尚未在设备上跑通；固定 900px 窗口在横屏 / 分屏 /
+软键盘弹出时的布局待真机确认。此处不提供任何模拟的下载耗时数据。
